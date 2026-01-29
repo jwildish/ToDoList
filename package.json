@@ -1,0 +1,15 @@
+{
+  "name": "shared-list-app",
+  "version": "1.0.0",
+  "description": "Shared list app for two users to manage grocery, costco, chores, and custom lists",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "better-sqlite3": "^9.4.3",
+    "socket.io": "^4.7.4"
+  }
+}
