@@ -84,6 +84,7 @@ io.on('connection', (socket) => {
 
 // --- Start ---
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Shared List App running at http://localhost:${PORT}`);
+const HOST = '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log(`Shared List App running at http://0.0.0.0:${PORT}`);
 });
