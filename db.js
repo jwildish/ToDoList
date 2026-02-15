@@ -1,89 +1,102 @@
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
 
-const db = new Database(path.join(dataDir, 'lists.db'));
+const dbPath = path.join(dataDir, 'lists.json');
 
-// Enable WAL mode for better concurrent read performance
-db.pragma('journal_mode = WAL');
+function loadData() {
+  if (!fs.existsSync(dbPath)) {
+    return { lists: [], items: [], nextListId: 1, nextItemId: 1 };
+  }
+  return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+}
 
-// Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS lists (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    list_id INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    checked INTEGER DEFAULT 0,
-    added_by TEXT NOT NULL,
-    checked_by TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (list_id) REFERENCES lists(id) ON DELETE CASCADE
-  );
-`);
-
-// Enable foreign keys
-db.pragma('foreign_keys = ON');
-
-// Prepared statements
-const stmts = {
-  getLists: db.prepare('SELECT * FROM lists ORDER BY created_at DESC'),
-  createList: db.prepare('INSERT INTO lists (name, created_by) VALUES (?, ?)'),
-  deleteList: db.prepare('DELETE FROM lists WHERE id = ?'),
-  getItems: db.prepare('SELECT * FROM items WHERE list_id = ? ORDER BY checked ASC, created_at DESC'),
-  getItem: db.prepare('SELECT * FROM items WHERE id = ?'),
-  addItem: db.prepare('INSERT INTO items (list_id, text, added_by) VALUES (?, ?, ?)'),
-  toggleItem: db.prepare('UPDATE items SET checked = CASE WHEN checked = 0 THEN 1 ELSE 0 END, checked_by = ? WHERE id = ?'),
-  deleteItem: db.prepare('DELETE FROM items WHERE id = ?'),
-  clearCheckedItems: db.prepare('DELETE FROM items WHERE list_id = ? AND checked = 1'),
-};
+function saveData(data) {
+  fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf8');
+}
 
 module.exports = {
   getLists() {
-    return stmts.getLists.all();
+    const data = loadData();
+    return data.lists.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   },
 
   createList(name, createdBy) {
-    const info = stmts.createList.run(name, createdBy);
-    return { id: info.lastInsertRowid, name, created_by: createdBy };
+    const data = loadData();
+    const list = {
+      id: data.nextListId++,
+      name,
+      created_by: createdBy,
+      created_at: new Date().toISOString(),
+    };
+    data.lists.push(list);
+    saveData(data);
+    return list;
   },
 
   deleteList(id) {
-    return stmts.deleteList.run(id);
+    const data = loadData();
+    const numId = Number(id);
+    data.lists = data.lists.filter(l => l.id !== numId);
+    data.items = data.items.filter(i => i.list_id !== numId);
+    saveData(data);
   },
 
   getItems(listId) {
-    return stmts.getItems.all(listId);
+    const data = loadData();
+    const numId = Number(listId);
+    return data.items
+      .filter(i => i.list_id === numId)
+      .sort((a, b) => {
+        if (a.checked !== b.checked) return a.checked - b.checked;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
   },
 
   getItem(id) {
-    return stmts.getItem.get(id);
+    const data = loadData();
+    return data.items.find(i => i.id === Number(id)) || null;
   },
 
   addItem(listId, text, addedBy) {
-    const info = stmts.addItem.run(listId, text, addedBy);
-    return { id: info.lastInsertRowid, list_id: Number(listId), text, checked: 0, added_by: addedBy, checked_by: null };
+    const data = loadData();
+    const item = {
+      id: data.nextItemId++,
+      list_id: Number(listId),
+      text,
+      checked: 0,
+      added_by: addedBy,
+      checked_by: null,
+      created_at: new Date().toISOString(),
+    };
+    data.items.push(item);
+    saveData(data);
+    return item;
   },
 
   toggleItem(id, checkedBy) {
-    stmts.toggleItem.run(checkedBy, id);
-    return stmts.getItem.get(id);
+    const data = loadData();
+    const numId = Number(id);
+    const item = data.items.find(i => i.id === numId);
+    if (!item) return null;
+    item.checked = item.checked ? 0 : 1;
+    item.checked_by = item.checked ? checkedBy : null;
+    saveData(data);
+    return item;
   },
 
   deleteItem(id) {
-    return stmts.deleteItem.run(id);
+    const data = loadData();
+    data.items = data.items.filter(i => i.id !== Number(id));
+    saveData(data);
   },
 
   clearCheckedItems(listId) {
-    return stmts.clearCheckedItems.run(listId);
+    const data = loadData();
+    const numId = Number(listId);
+    data.items = data.items.filter(i => !(i.list_id === numId && i.checked));
+    saveData(data);
   },
 };
